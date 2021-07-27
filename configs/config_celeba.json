@@ -1,0 +1,146 @@
+{
+    "id": "vanillavae_celeba",
+    "model": "VanillaVAE",
+    "dataset": "CelebA",
+    "path_to_data": "./data/celeba",
+    "train" : 1,  
+    "resolution": 128,
+    "latent_dim": 128,
+    "hidden_dims": [16, 32, 64, 128,  256, 512],
+    "encoder":{
+        "layer_configs":
+        [
+        {
+            "in_channels": 3,
+            "out_channels": 16, 
+            "kernel_size": 3,
+            "stride": 2,
+            "padding": 1
+        },
+        {
+            "in_channels": 16,
+            "out_channels": 32, 
+            "kernel_size": 3,
+            "stride": 2,
+            "padding": 1
+        },
+        {
+            "in_channels": 32,
+            "out_channels": 64, 
+            "kernel_size": 3,
+            "stride": 2,
+            "padding": 1
+        },
+        {
+            "in_channels": 64,
+            "out_channels": 128, 
+            "kernel_size": 3,
+            "stride": 2,
+            "padding": 1
+        },
+        {
+            "in_channels": 128,
+            "out_channels": 256, 
+            "kernel_size": 3,
+            "stride": 2,
+            "padding": 1
+        },
+        {
+            "in_channels": 256,
+            "out_channels": 512, 
+            "kernel_size": 3,
+            "stride": 2,
+            "padding": 1
+        }
+        ]
+    },
+    "fc_mu_var":{
+        "in_channels": 2048, 
+        "out_channels": 128
+    },
+    "decoder":{
+        "layer_configs":
+        [
+        {
+            "in_channels": 512,
+            "out_channels": 256, 
+            "kernel_size": 3,
+            "stride": 2,
+            "padding": 1,
+            "output_padding": 1
+        },
+        {
+            "in_channels": 256,
+            "out_channels": 128, 
+            "kernel_size": 3,
+            "stride": 2,
+            "padding": 1,
+            "output_padding": 1
+        },
+        {
+            "in_channels": 128,
+            "out_channels": 64, 
+            "kernel_size": 3,
+            "stride": 2,
+            "padding": 1,
+            "output_padding": 1
+        },
+        {
+            "in_channels": 64,
+            "out_channels": 32, 
+            "kernel_size": 3,
+            "stride": 2,
+            "padding": 1,
+            "output_padding": 1
+        },
+        {
+            "in_channels": 32,
+            "out_channels": 16, 
+            "kernel_size": 3,
+            "stride": 2,
+            "padding": 1,
+            "output_padding": 1
+        },
+        {
+            "in_channels": 16,
+            "out_channels": 16, 
+            "kernel_size": 3,
+            "stride": 2,
+            "padding": 1,
+            "output_padding": 1
+        },
+        {
+            "in_channels": 16,
+            "out_channels": 3, 
+            "kernel_size": 3,
+            "stride": 1,
+            "padding": 1
+        }
+
+        ]
+
+    },
+    "training": {
+        "epochs": 50,
+        "resume_epochs": 0,
+        "restored_model_path": "",
+        "kld_weight": 0.0003,
+        "batch_size": 64,
+        "lr": 0.0005,
+        "weight_decay": 0.0,
+        "beta1" : 0.9,
+        "beta2" : 0.999,
+        "milestones": [], 
+        "scheduler_gamma": 0.95,
+        "print_freq": 50,
+        "sample_freq": 1500,
+        "model_save_freq": 10,
+        "manual_seed": 1265
+    },
+    "test":{
+        "test_epochs": 50,
+        "batch_size" : 1,
+        "test_dim": 0,
+        "test_model_path": ""
+    }
+}

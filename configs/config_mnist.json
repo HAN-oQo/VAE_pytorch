@@ -1,0 +1,100 @@
+{
+    "id": "vanillavae_mnist",
+    "model": "VanillaVAE",
+    "dataset": "mnist",
+    "path_to_data": "./data",
+    "train" : 1,  
+    "resolution": 28,
+    "latent_dim": 3,
+    "hidden_dims": [32, 64, 128],
+    "encoder":{
+        "layer_configs":
+        [
+        {
+            "in_channels": 1,
+            "out_channels": 32, 
+            "kernel_size": 3,
+            "stride": 2,
+            "padding": 1
+        },
+        {
+            "in_channels": 32,
+            "out_channels": 64, 
+            "kernel_size": 3,
+            "stride": 2,
+            "padding": 1
+        },
+        {
+            "in_channels": 64,
+            "out_channels": 128, 
+            "kernel_size": 3,
+            "stride": 2,
+            "padding": 1
+        }
+        ]
+    },
+    "fc_mu_var":{
+        "in_channels": 2048, 
+        "out_channels": 3
+    },
+    "decoder":{
+        "layer_configs":
+        [
+        {
+            "in_channels": 128,
+            "out_channels": 64, 
+            "kernel_size": 3,
+            "stride": 2,
+            "padding": 1,
+            "output_padding": 0
+        },
+        {
+            "in_channels": 64,
+            "out_channels": 32, 
+            "kernel_size": 3,
+            "stride": 2,
+            "padding": 1,
+            "output_padding": 1
+        },
+        {
+            "in_channels": 32,
+            "out_channels": 32, 
+            "kernel_size": 3,
+            "stride": 2,
+            "padding": 1,
+            "output_padding": 1
+        },
+        {
+            "in_channels": 32,
+            "out_channels": 1, 
+            "kernel_size": 3,
+            "stride": 1,
+            "padding": 1
+        }
+
+        ]
+
+    },
+    "training": {
+        "epochs": 50,
+        "resume_epochs": 0,
+        "restored_model_path": "/home/hankyu/hankyu/disentangle/vae/2021-07-26_18-04_vanillavae_mnist/models",
+        "kld_weight": 0.00027,
+        "batch_size": 64,
+        "lr": 0.0005,
+        "weight_decay": 0.0,
+        "beta1" : 0.9,
+        "beta2" : 0.999,
+        "milestones": [], 
+        "scheduler_gamma": 0.95,
+        "print_freq": 50,
+        "sample_freq": 1700,
+        "model_save_freq": 10,
+        "manual_seed": 1265
+    },
+    "test":{
+        "test_epochs": 50,
+        "batch_size" : 1,
+        "test_model_path": "/home/hankyu/hankyu/disentangle/vae/2021-07-26_18-58_vanillavae_mnist/models"
+    }
+}
