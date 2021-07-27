@@ -169,7 +169,7 @@ class Trainer():
                 loss.backward()
 
                 self.optimizer.step()
-                self.scheduler.step()
+                
 
                 loss_item={}
                 loss_item["rec_loss"] = item[0]
@@ -196,7 +196,8 @@ class Trainer():
                         save_image(self.denorm(samples.cpu()), sample_path, nrow=self.batch_size // 8, padding =0)
                         print('Saved samples into {}...'.format(sample_path))
             
-
+            self.scheduler.step()
+            
             if i % self.model_save_freq == 0:
                 model_path = os.path.join(self.model_save_dir, "{}-VAE.pt".format(i+1))
                 torch.save({
