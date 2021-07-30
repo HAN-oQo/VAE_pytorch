@@ -3,6 +3,7 @@ import os
 import numpy as np
 import time
 import datetime
+import numpy as np
 
 import torch
 import torch.nn as nn
@@ -14,16 +15,18 @@ from training.logger import Logger
 
 class Trainer():
 
-    def __init__(self, device, model, distribution, name, data_loader, batch_size, num_train_imgs, kld_weight, directory , epochs, test_epochs, resume_epochs, restored_model_path, test_model_path, lr, weight_decay, beta1, beta2, milestones, scheduler_gamma, print_freq, sample_freq, model_save_freq, test_dim):
+    def __init__(self, device, model, distribution, name, data_loader, batch_size, num_train_imgs, kld_weight, directory , max_iters, resume_iters, capacity_iters, restored_model_path, beta, gamma, max_capacity, loss_type, lr, weight_decay, beta1, beta2, milestones, scheduler_gamma, print_freq, sample_freq, model_save_freq, test_iters, test_dim, test_seed, start, end, steps):
         
         self.device = device
         self.model = model
+        self.distribution = distribution
         self.name = name
+
         self.data_loader = data_loader
         self.batch_size = batch_size
+        
         self.num_train_imgs = num_train_imgs
         self.kld_weight = batch_size / num_train_imgs
-        self.distribution = distribution
         self.num_batchs = num_train_imgs // batch_size
 
         self.directory = directory
@@ -47,13 +50,22 @@ class Trainer():
         if not os.path.exists(os.path.join(directory, "models")):
             os.makedirs(model_save_dir)
         self.model_save_dir = model_save_dir
+        self.test_model_path = model_save_dir
 
-        self.epochs = epochs
-        self.test_epochs = test_epochs
-        self.resume_epochs = resume_epochs
+        self.max_iters = max_iters
+        self.resume_iters = resume_iters
+        if self.resume_iters > 0:
+            self.global_iters = resume_iters
+        self.global_iters = 0
+        self.capacity_iters = capacity_iters
 
         self.restored_model_path = restored_model_path
-        self.test_model_path = test_model_path
+
+        self.beta = beta
+        self.gamma = gamma
+        self.max_capacity = max_capacity
+        self.C_max = torch.Tensor([max_capacity])
+        self.loss_type = loss_type
 
         self.lr = lr 
         self.weight_decay = weight_decay
@@ -67,7 +79,12 @@ class Trainer():
         self.sample_freq = sample_freq
         self.model_save_freq = model_save_freq
 
+        self.test_iters = test_iters
         self.test_dim = test_dim
+        self.test_seed = test_seed
+        self.start = start
+        self.end = end
+        self.steps = steps
 
         self.optimizer = torch.optim.Adam(self.model.parameters(), 
                                         lr = self.lr,
@@ -88,11 +105,13 @@ class Trainer():
         print(name)
         print("The number of parameters: {}".format(num_params))
     
-    def load_model(self, path, resume_epochs):
+    def load_model(self, path, resume_iters):
         """Restore the trained generator and discriminator."""
-        print('Loading the trained models from epoch {}...'.format(resume_epochs))
-        path = os.path.join( path , '{}-VAE.pt'.format(resume_epochs))
+        resume_iters = int(resume_iters)
+        print('Loading the trained models from iters {}...'.format(resume_iters))
+        path = os.path.join( path , '{}-VAE.pt'.format(resume_iters))
         checkpoint = torch.load(path, map_location=lambda storage, loc: storage)
+        self.global_iters = checkpoint['iters']
         self.model.load_state_dict(checkpoint['model'])
         self.optimizer.load_state_dict(checkpoint['optimizer'])
         self.scheduler.load_state_dict(checkpoint['scheduler'])
@@ -127,19 +146,30 @@ class Trainer():
         # how to get kldweight?
         
         kld_loss = torch.mean(-0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp(), dim = 1), dim = 0)
-        return self.kld_weight * kld_loss
+        return kld_loss
 
 
     def loss_function(self, recons, input, mu, log_var):
-        
+       
         if self.name == 'VanillaVAE':
             rec_loss = self.reconstruction_loss(recons, input)
             kld_loss = self.KLD_loss(mu, log_var)
-            return rec_loss + kld_loss, [rec_loss.item(), kld_loss.item()]
-        elif self.name == 'BetaVAE_H':
-            raise NotImplementedError
-        elif self.name == 'BetaVAE_B':
-            raise NotImplementedError
+            return rec_loss + self.kld_weight * kld_loss, [rec_loss.item(), kld_loss.item()]
+        elif self.name == 'BetaVAE':
+            if self.loss_type == 'B':
+                # Understanding disentangling in β-VAE
+                rec_loss = self.reconstruction_loss(recons, input)
+                self.C_max = self.C_max.to(self.device)
+                C = torch.clamp(self.C_max/self.capacity_iters*self.global_iters, 0, self.C_max.data[0])
+                kld_loss = self.KLD_loss(mu, log_var)
+                return rec_loss + self.gamma * self.kld_weight * (kld_loss - C).abs(), [rec_loss.item(), kld_loss.item()]
+            elif self.loss_type == 'H':
+                # beta-VAE: Learning Basic Visual Concepts with a Constrained Variational Framework 
+                rec_loss = self.reconstruction_loss(recons, input)
+                kld_loss = self.KLD_loss(mu, log_var)
+                return rec_loss + self.beta * self.kld_weight * kld_loss, [rec_loss.item(), kld_loss.item()]
+
+
         else:
             raise(RuntimeError("Model Name Wrong"))
 
@@ -149,59 +179,61 @@ class Trainer():
         # sample_fixed = next(data_iter)
         # sample_fixed.to(self.device)
 
-        start_epoch = 0
-        if self.resume_epochs > 0:
-            start_epoch = self.resume_epochs
-            self.load_model(self.restored_model_path, self.resume_epochs)
+        if self.resume_iters > 0:
+            self.load_model(self.restored_model_path, self.resume_iters)
             self.model.to(self.device)
         
+        data_iter = iter(self.data_loader)
+
         print("Start Training...")
         start_time = time.time()
-        for i in range(start_epoch, self.epochs):
+        while self.global_iters <= self.max_iters:
+            try:
+                data, _ = next(data_iter)
+            except:
+                data_iter = iter(self.data_loader)
+                data, _ = next(data_iter)
 
-            for batch_idx, [data, _] in enumerate(self.data_loader):
-                
-                self.optimizer.zero_grad()
-                data = data.to(self.device)
-                recons, input, mu, log_var = self.model(data)
+            self.global_iters += 1
 
-                loss, item = self.loss_function(recons, input, mu, log_var)
-                loss.backward()
+            self.optimizer.zero_grad()
 
-                self.optimizer.step()
-                
+            data = data.to(self.device)
+            recons, input, mu, log_var = self.model(data)
+            loss, item = self.loss_function(recons, input, mu, log_var)
+            loss.backward()
 
-                loss_item={}
-                loss_item["rec_loss"] = item[0]
-                loss_item["kld_loss"] = item[1]
-
+            self.optimizer.step()
             
-                
-                if batch_idx % self.print_freq == 0:
-                    et = time.time() - start_time
-                    et = str(datetime.timedelta(seconds=et))[:-7]
-                    log = "Elapsed [{}], Epoch [{}/{}], Iteration[{}/{}]".format(et, i+1, self.epochs, batch_idx, self.num_batchs)
-                    for tag, value in loss_item.items():
-                        log += ", {}: {:4f}".format(tag, value)
-                    print(log)
+            loss_item={}
+            loss_item["rec_loss"] = item[0]
+            loss_item["kld_loss"] = item[1]
+            
+            if self.global_iters % self.print_freq == 0:
+                et = time.time() - start_time
+                et = str(datetime.timedelta(seconds=et))[:-7]
+                log = "Elapsed [{}], Iteration[{}/{}]".format(et, self.global_iters, self.max_iters)
+                for tag, value in loss_item.items():
+                    log += ", {}: {:4f}".format(tag, value)
+                print(log)
 
-                    for tag, value in loss_item.items():
-                        self.logger.scalar_summary(tag, value, (self.num_train_imgs // self.batch_size)*(i)+ (batch_idx))
-                
-                if batch_idx % self.sample_freq == 0:
-                    with torch.no_grad():
-                        samples = self.model.sample(self.batch_size, self.device)
-                        
-                        sample_path = os.path.join(self.sample_dir, "{}_{}-sample.jpg".format(i+1, batch_idx))
-                        save_image(self.denorm(samples.cpu()), sample_path, nrow=self.batch_size // 8, padding =0)
-                        print('Saved samples into {}...'.format(sample_path))
+                for tag, value in loss_item.items():
+                    self.logger.scalar_summary(tag, value, self.global_iters)
             
-            self.scheduler.step()
-            
-            if i % self.model_save_freq == 0:
-                model_path = os.path.join(self.model_save_dir, "{}-VAE.pt".format(i+1))
+            if self.global_iters % self.sample_freq == 0:
+                with torch.no_grad():
+                    samples = self.model.sample(self.batch_size, self.device)
+                    
+                    sample_path = os.path.join(self.sample_dir, "{}-sample.jpg".format(self.global_iters))
+                    save_image(self.denorm(samples.cpu()), sample_path, nrow=self.batch_size // 10, padding =0)
+                    print('Saved samples into {}...'.format(sample_path))
+        
+            # self.scheduler.step()
+
+            if self.global_iters % self.model_save_freq == 0:
+                model_path = os.path.join(self.model_save_dir, "{}-VAE.pt".format(self.global_iters))
                 torch.save({
-                    'epoch': i,
+                    'iters': self.global_iters,
                     'model': self.model.state_dict(),
                     'optimizer' : self.optimizer.state_dict(),
                     'scheduler' : self.scheduler.state_dict()
@@ -209,22 +241,71 @@ class Trainer():
                 # torch.save(self.model.state_dict(), model_path)
                 print('Saved model checkpoints into {}...'.format(self.model_save_dir))
         
-        model_path = os.path.join(self.model_save_dir, "{}-VAE.pt".format(i+1))
+
+        model_path = os.path.join(self.model_save_dir, "{}-VAE.pt".format(self.global_iters))
         torch.save(self.model.state_dict(), model_path)
         print('Saved model checkpoints into {}...'.format(self.model_save_dir))
 
     def test(self):
 
-        self.load_model(self.test_model_path, self.test_epochs)
+        self.load_model(self.test_model_path, self.test_iters)
         self.model.to(self.device)
         
-        if not os.path.exists(os.path.join(self.result_dir, self.test_dim)):
-            os.makedirs(os.path.join(self.result_dir, self.test_dim))
-
         with torch.no_grad():
-            for batch_idx, [data, _] in enumerate(self.data_loader):
-                data = data.to(self.device)
-                out = self.model.generate(data, self.device, dim= self.test_dim)
-                result_path = os.path.join(os.path.join(self.result_dir, self.test_dim), '{}-out.jpg'.format(batch_idx))             
-                save_image(self.denorm(out), result_path, nrow=1, padding=0)
+            # -----------------------------------------------------------
+            # walking specific latent dimension
+            
+            # -----------------------------------------------------------
+            # for batch_idx, [data, _] in enumerate(self.data_loader):
+            #     data = data.to(self.device) 
                 
+            #     mu, log_var = self.model.encode(data)
+            #     z = self.model.reparameterize(mu, log_var)
+            #     if len(self.test_dim) == 1:
+            #         if not os.path.exists(os.path.join(self.result_dir, str(self.test_dim))):
+            #             os.makedirs(os.path.join(self.result_dir, str(self.test_dim)))
+            #         out = self.model.generate(z,  self.device, dim= self.test_dim)
+            #         result_path = os.path.join(os.path.join(self.result_dir, str(self.test_dim)), '{}-out.jpg'.format(batch_idx))             
+            #         save_image(self.denorm(out.cpu()), result_path, nrow=1, padding=0)
+            #         print("Saved result images {}-out.jpg into {}...".format(batch_idx, result_path))
+            #     else:
+            #         for ind in range(len(self.test_dim) -1):
+            #             t_dim = [self.test_dim[ind], self.test_dim[ind+1]]
+            #             if not os.path.exists(os.path.join(self.result_dir, str(t_dim))):
+            #                 os.makedirs(os.path.join(self.result_dir, str(t_dim)))
+            #             out = self.model.generate(z,  self.device, dim= t_dim)
+            #             result_path = os.path.join(os.path.join(self.result_dir, str(t_dim)), '{}-out.jpg'.format(batch_idx))             
+            #             save_image(self.denorm(out.cpu()), result_path, nrow=1, padding=0)
+            #             print("Saved result images {}-out.jpg into {}...".format(batch_idx, result_path))
+                
+            #     if batch_idx == 60:
+            #         break
+
+
+            # -----------------------------------------------------------------------
+            # latent traversal for all dmensions
+            #
+            # -----------------------------------------------------------------------
+            walking_result_dir = os.path.join(self.result_dir, 'walking')
+            if not os.path.exists(walking_result_dir):
+                os.makedirs(walking_result_dir)
+            
+            latent_dim = self.model.latent_dim
+
+            random_seeds= self.test_seed
+            z_list = []
+            for seed in random_seeds:
+                np.random.seed(seed)
+                z = np.random.normal(size = latent_dim)
+                z = np.float32(z)
+                z = torch.tensor(z)
+                z_list.append(z)
+                        
+            test_latents = torch.stack(z_list, dim=0)
+            for d in range(latent_dim):
+                out = self.model.traverse_latents(self.device, test_latents, d, start = self.start, end = self.end, steps = self.steps)
+                result_path = os.path.join(walking_result_dir, 'dim-{}.jpg'.format(d))
+                save_image(self.denorm(out.cpu()), result_path, nrow=10, padding = 0)
+                print("Saved result images dim-{}.jpg into {}...".format(d, result_path))
+                
+

@@ -1,9 +1,11 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.nn.init as init
 from torch.nn.modules.activation import LeakyReLU
 from models import BaseVAE
 import math
+import numpy as np
 
 
 class VanillaVAE(BaseVAE):
@@ -81,7 +83,11 @@ class VanillaVAE(BaseVAE):
                     padding = last_layer["padding"]),
             nn.Tanh()
         )
-
+    
+    def weight_init(self):
+        for block in self._modules:
+            for m in self._modules[block]:
+                kaiming_init()
 
     def encode(self, input):
         batch_size = input.size()[0]
@@ -122,35 +128,103 @@ class VanillaVAE(BaseVAE):
         samples = self.decode(z)
         return samples
 
-    def generate(self, data, device, dim):
-        mu, log_var = self.encode(data)
-        z = self.reparameterize(mu, log_var)
+    def generate(self, z, device, dim):
         
-        z_list0 = []
-        # z_list1 = []
-        # z_list2 = []
+        batch_size, _  = z.size()
+        if len(dim) == 1:
+            # batch_size, _ , _ , _ = data.size()
+            # mu, log_var = self.encode(data)
+            # z = self.reparameterize(mu, log_var)
+            dim = dim[0]
+            z_list0 = []
+            z_list0.append(self.decode(z))        
+            for i in range(11):
+                z_i = z.clone()
+                z_i[ : , dim] += (i-5)/2
+                z_list0.append(self.decode(z_i))
+                        
+            zi_concat = torch.cat(z_list0, dim=3)
+            return zi_concat
+        elif len(dim) == 2:
+            dim1 = dim[0]
+            dim2 = dim[1]
 
-        z_list0.append(self.decode(z))
-        # z_list1.append(self.decode(z))
-        # z_list2.append(self.decode(z))
+            if batch_size != 1:
+                return(RuntimeError("Batch Size should be 1 when you test 2 dimensions."))
+            # mu, log_var = self.encode(data)
+            # z = self.reparameterize(mu, log_var)
 
-        for i in range(11):
-            z_i = z.clone()
-            z_i[0, dim] = (i-5)/1.5
-            z_list0.append(self.decode(z_i))
-            
-        # for j in range(11):
-        #     z_j = z.clone()
-        #     z_j[0, 1] = (j-5)/1.5
-        #     z_list1.append(self.decode(z_j))
-
-        # for k in range(11):
-        #     z_k = z.clone()
-        #     z_k[0, 2] = (k-5)/1.5
-        #     z_list2.append(self.decode(z_k))
+            z_list0 = []
+            for i in range(11):
+                z_list1 = []
+                z_i = z.clone()
+                z_i[0,dim1] += (i-5)/3
+                for j in range(11):
+                    z_j = z_i.clone()
+                    z_j[0,dim2] += (j-5)/3
+                    z_list1.append(self.decode(z_j)) 
+                    zj_concat = torch.cat(z_list1, dim=3)
+                z_list0.append(zj_concat)
         
-        zi_concat = torch.cat(z_list0, dim=3)
-        # zj_concat = torch.cat(z_list1, dim=3)
-        # zk_concat = torch.cat(z_list2, dim=3)
-        # print(zi_concat.size())
-        return zi_concat
+            zi_concat = torch.cat(z_list0, dim=2)
+            return zi_concat
+        else:
+            raise NotImplementedError            
+    
+    def traverse_latents(self, device, latents, dim, start=-3.0, end=3.0, steps= 10):
+        latent_num, _ = latents.size()
+        
+        interpolation = torch.linspace(start= start, end =end, steps = steps)
+        traversal_vectors = torch.zeros(latent_num*interpolation.size()[0], self.latent_dim)
+        for i in range(latent_num):
+            z_base = latents[i].clone()
+            traversal_vectors[i*steps:(i+1)*steps, :] = z_base
+            traversal_vectors[i*steps:(i+1)*steps, dim] = interpolation
+        
+        traversal_vectors = traversal_vectors.to(device)
+        out = self.decode(traversal_vectors)
+        # out_concat = torch.cat(out, dim=3)
+        return out
+
+
+        # random_seeds= [42, 62, 1024, 72, 92]
+
+        # z_list = []
+        # for seed in random_seeds:
+        #     np.random.seed(seed)
+        #     z = np.random.normal(size = self.latent_dim)
+        #     z = np.float32(z)
+        #     z = torch.tensor(z)
+        #     z_list.append(z)
+        
+        # latents = torch.stack(z_list, dim=0)
+        # print(latents.size())
+
+
+
+    
+###
+# Weight Initialization
+# 
+def kaiming_init(m):
+    if isinstance(m, (nn.Linear, nn.Conv2d)):
+        init.kaiming_normal(m.weight)
+        if m.bias is not None:
+            m.bias.data.fill_(0)
+    elif isinstance(m, (nn.BatchNorm1d, nn.BatchNorm2d)):
+        m.weight.data.fill_(1)
+        if m.bias is not None:
+            m.bias.data.fill_(0)
+
+
+def normal_init(m, mean, std):
+    if isinstance(m, (nn.Linear, nn.Conv2d)):
+        m.weight.data.normal_(mean, std)
+        if m.bias.data is not None:
+            m.bias.data.zero_()
+    elif isinstance(m, (nn.BatchNorm2d, nn.BatchNorm1d)):
+        m.weight.data.fill_(1)
+        if m.bias.data is not None:
+            m.bias.data.zero_()
+
+###

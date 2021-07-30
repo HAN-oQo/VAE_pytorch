@@ -25,17 +25,25 @@ def mnist(path_to_data, batch_size=16, size=28, train=True, download=False):
 
 def CelebA(path_to_data, batch_size = 64, size = 128, train = True):
 
-    all_transforms = transforms.Compose([
-        transforms.RandomHorizontalFlip(),
-        transforms.CenterCrop(148),
-        transforms.Resize(size),
-        transforms.ToTensor(),
-        transforms.Normalize(mean = (0.5, 0.5, 0.5), std = (0.5, 0.5, 0.5))
-    ])
 
     if train:
+        all_transforms = transforms.Compose([
+            transforms.RandomHorizontalFlip(),
+            transforms.CenterCrop(148),
+            transforms.Resize(size),
+            transforms.ToTensor(),
+            transforms.Normalize(mean = (0.5, 0.5, 0.5), std = (0.5, 0.5, 0.5))
+        ])
+
         data_path = os.path.join(path_to_data, 'trainset')
     else:
+        all_transforms = transforms.Compose([
+            transforms.CenterCrop(148),
+            transforms.Resize(size),
+            transforms.ToTensor(),
+            transforms.Normalize(mean = (0.5, 0.5, 0.5), std = (0.5, 0.5, 0.5))
+        ])
+
         data_path = os.path.join(path_to_data, 'testset')
     
     dataset = datasets.ImageFolder(data_path, transform = all_transforms)

@@ -30,27 +30,20 @@ with open(config_path) as f:
 if config["path_to_data"] == "":
     raise(RuntimeError("Path to data not specified. Modify path_to_data attribute in config to point to data."))
 
-# Create a folder to store experiment results
-timestamp = time.strftime("%Y-%m-%d_%H-%M")
-directory = "{}_{}".format(timestamp, config["id"])
-if not os.path.exists(directory):
-    os.makedirs(directory)
+if config["train"] > 0:
+    # Create a folder to store experiment results
+    timestamp = time.strftime("%Y-%m-%d_%H-%M")
+    directory = "{}_{}".format(timestamp, config["id"])
+    if not os.path.exists(directory):
+        os.makedirs(directory)
 
+    # Save config file in experiment directory
+    with open(directory + '/config.json', 'w') as f:
+        json.dump(config, f)
 
+else:
+    directory = config["test"]["test_path"]
 
-# Save config file in experiment directory
-with open(directory + '/config.json', 'w') as f:
-    json.dump(config, f)
-
-# Create a folder to store experiment results
-timestamp = time.strftime("%Y-%m-%d_%H-%M")
-directory = "{}_{}".format(timestamp, config["id"])
-if not os.path.exists(directory):
-    os.makedirs(directory)
-
-# Save config file in experiment directory
-with open(directory + '/config.json', 'w') as f:
-    json.dump(config, f)
 
 # For reproducibility
 # torch.manual_seed(config["training"]["manual_seed"])
@@ -83,7 +76,7 @@ if config["dataset"] == "mnist":
                         batch_size = batch_size,
                         size = resolution,
                         train= train, 
-                        download = True)
+                        download = False)
 elif config["dataset"] == 'CelebA':
     distribution = 'gaussian'
     path_to_data = config["path_to_data"]
@@ -113,26 +106,35 @@ else:
 
 
 # Model Construction
-VAE = VanillaVAE(encoder_configs, decoder_configs, fc_configs, latent_dim).to(device)
+if config["model"] == "VanillaVAE":
+    VAE = VanillaVAE(encoder_configs, decoder_configs, fc_configs, latent_dim).to(device)
+    print("\nVanilla VAE")
+    print(VAE)
+    print("Number of parameters: {}".format(count_parameters(VAE)))
+elif config["model"] == "BetaVAE":
+    BetaVAE = VanillaVAE(encoder_configs, decoder_configs, fc_configs, latent_dim).to(device)
+    print("\nBetaVAE")
+    print(BetaVAE)
+    print("Number of parameters: {}".format(count_parameters(BetaVAE)))
 
-print("\nVanilla VAE")
-print(VAE)
-print("Number of parameters: {}".format(count_parameters(VAE)))
 
 
 #Trainer
-trainer = Trainer(device, VAE, distribution,
+trainer = Trainer(device, BetaVAE, distribution,
                 name = config["model"], 
                 data_loader = dataloader, 
                 batch_size = batch_size, 
                 num_train_imgs = num_train_imgs,
                 kld_weight = training["kld_weight"], 
                 directory = directory,
-                epochs = training["epochs"],
-                test_epochs = test["test_epochs"],
-                resume_epochs = training["resume_epochs"],
+                max_iters = training["max_iters"],
+                resume_iters = training["resume_iters"],
+                capacity_iters = training["capacity_iters"],
                 restored_model_path = training["restored_model_path"],
-                test_model_path = test["test_model_path"],
+                beta = training["beta"],
+                gamma = training["gamma"],
+                max_capacity = training["max_capacity"],
+                loss_type = training["loss_type"],
                 lr = training["lr"],
                 weight_decay = training["weight_decay"],
                 beta1 = training["beta1"],
@@ -142,7 +144,12 @@ trainer = Trainer(device, VAE, distribution,
                 print_freq = training["print_freq"],
                 sample_freq = training["sample_freq"],
                 model_save_freq = training["model_save_freq"],
-                test_dim = test["test_dim"])
+                test_iters = test["test_iters"],
+                test_dim = test["test_dim"],
+                test_seed = test["test_seed"],
+                start = test["start"],
+                end = test["end"],
+                steps = test["steps"])
 
 if train:
     trainer.train()
