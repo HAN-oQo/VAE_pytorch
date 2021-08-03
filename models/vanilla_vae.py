@@ -44,12 +44,12 @@ class VanillaVAE(BaseVAE):
         if self.fc_layer["out_channels"] != self.latent_dim:
             raise(RuntimeError("latent dim error"))
 
-        self.fc_mu = nn.Linear(self.fc_layer["in_channels"], self.fc_layer["out_channels"])
-        self.fc_var = nn.Linear(self.fc_layer["in_channels"], self.fc_layer["out_channels"])
+        self.fc_mu = nn.Sequential(nn.Linear(self.fc_layer["in_channels"], self.fc_layer["out_channels"]))
+        self.fc_var = nn.Sequential(nn.Linear(self.fc_layer["in_channels"], self.fc_layer["out_channels"]))
 
 
         decoder = []
-        self.z_to_dec = nn.Linear(self.fc_layer["out_channels"], self.fc_layer["in_channels"])
+        self.z_to_dec = nn.Sequential(nn.Linear(self.fc_layer["out_channels"], self.fc_layer["in_channels"]))
 
         for i in range(len(self.dec_layers)-1):
             layer = self.dec_layers[i]
@@ -89,7 +89,7 @@ class VanillaVAE(BaseVAE):
     def weight_init(self):
         for block in self._modules:
             for m in self._modules[block]:
-                kaiming_init()
+                kaiming_init(m)
 
     def encode(self, input):
         batch_size = input.size()[0]
